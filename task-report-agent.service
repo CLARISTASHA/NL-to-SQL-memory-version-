@@ -1,0 +1,31 @@
+[Unit]
+Description=Task Report Agent FastAPI Service
+After=network.target ollama.service
+Requires=ollama.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/task_report_agent
+
+# Load environment variables from .env file
+EnvironmentFile=/opt/task_report_agent/.env
+
+ExecStart=/opt/task_report_agent/venv/bin/uvicorn app:app \
+    --host 0.0.0.0 \
+    --port 8000 \
+    --workers 1
+
+Restart=always
+RestartSec=5
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=task-report-agent
+
+# Resource limits
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

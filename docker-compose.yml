@@ -1,0 +1,30 @@
+version: "3.9"
+
+services:
+  task-report-agent:
+    build: .
+    container_name: task_report_agent
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - DB_HOST=${DB_HOST}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME}
+      - API_KEY=${API_KEY}
+    volumes:
+      # Persist Ollama models — prevents re-download on every restart
+      - ollama_models:/root/.ollama
+      # Persist application logs on host machine
+      - ./logs:/var/log/task_report_agent
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      # FIX: 120s start_period — phi3:mini download takes time on first run
+      start_period: 120s
+
+volumes:
+  ollama_models:

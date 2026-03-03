@@ -1,0 +1,184 @@
+TABLE: channel_users
+- id int (PRI)
+- channel_id int
+- user_id int
+- created_dt timestamp
+- unread_count int
+
+TABLE: channels
+- id int (PRI)
+- channel_id int
+- company_id int
+- channel_name varchar(80)
+- channel_image varchar(50)
+- channel_created_dt timestamp
+- channel_admin int
+- channel_members int
+- channel_deleted_dt timestamp
+- channel_view int
+- channel_default int
+
+TABLE: channels_posts
+- id int (PRI)
+- post_id int (MUL)
+- channel_id int (MUL)
+- user_id int
+- description text
+- post_type int
+- created_at timestamp
+- post_status int
+- post_lat float
+- post_lng float
+- comments_off int
+- commentsCount int
+- deleted_at timestamp (MUL)
+- posted_device varchar(100)
+- reply_postId int
+- client_id text
+- edit_status int
+- component_type varchar(50)
+
+TABLE: company
+- id int (PRI)
+- company_id int
+- name varchar(255)
+- image varchar(255)
+- created_at timestamp
+- created_by int
+- members_count int
+- trail_expired_date datetime
+- free_trail tinyint(1)
+- inactive_members int
+- active_members int
+- credits int
+- trail_started_date datetime
+- trail_duration int
+- status varchar(255)
+
+TABLE: history_items
+- id varchar(36) (PRI)
+- user_id varchar(255) (MUL)
+- query text
+- result text
+- timestamp bigint
+- is_favorite tinyint(1)
+- tags json
+
+TABLE: lists
+- id int
+- company_id int
+- user_id int
+- title text
+- symbol text
+- colour text
+- type text
+- assignee text
+- total_task_count int
+- total_member int
+- cron_run int
+- created_at text
+- updated_at text
+
+TABLE: organization_struct
+- id int (PRI)
+- company_id int
+- user_id int
+- reportTo int
+- dateTime datetime
+- created_by int
+- deleted_by int
+- deleted_at datetime
+
+TABLE: projects
+- id int
+- company_id int
+- user_id int
+- title text
+- description text
+- due_date text
+- status text
+- tag text
+- priority text
+- completed_task int
+- total_task int
+- total_comment int
+- total_member int
+- cron_run int
+- created_at text
+- updated_at text
+
+TABLE: tasks
+- id int (PRI)
+- company_id int
+- user_id int
+- list_id int
+- project_id int
+- group_id int
+- parent_id int
+- parent_user_id int
+- title text
+- description text
+- remainder datetime
+- tag text
+- stage text
+- priority text
+- note text
+- due_date datetime
+- status text
+- assigned_to text
+- assigned_by int
+- started_at datetime
+- completed_at datetime
+- sub_task_count int
+- cron_run tinyint(1)
+- created_at datetime
+- updated_at datetime
+- recent_at datetime
+
+TABLE: user_history
+- user_id varchar(255) (PRI)
+- last_active bigint
+- max_history_items int
+- show_favorites_only tinyint(1)
+
+TABLE: user_task
+- id int (PRI)
+- company_id int
+- company_name varchar(255)
+- user_id int
+- user_name varchar(255)
+- device varchar(10)
+- designation varchar(50)
+- project_id int
+- project_name varchar(255)
+- list_id int
+- parent_id int
+- list_name varchar(255)
+- title text
+- description text
+- priority text
+- note text
+- due_date datetime
+- status text
+- internal_status varchar(45)
+- tag varchar(300)
+- assigned_by varchar(255)
+- assigned_to varchar(255)
+- started_at datetime
+- completed_at datetime
+- cron_run tinyint
+
+TABLE: users
+- id int (PRI)
+- company_id int (MUL)
+- user_id int (MUL)
+- user_name varchar(255)
+- login_type varchar(255)
+- created_at timestamp
+- device varchar(10)
+- device_token text
+- designation varchar(50)
+- token_expiration timestamp
+- user_type int
+- user_status int
+- app_version varchar(15)

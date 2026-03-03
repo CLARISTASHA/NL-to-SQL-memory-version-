@@ -1,0 +1,179 @@
+DATABASE SCHEMA DOCUMENTATION
+==================================================
+
+TABLE: users
+--------------------------------------------------
+Columns:
+- id INT PRIMARY KEY
+- company_id INT
+- user_id INT
+- user_name VARCHAR
+- designation VARCHAR
+- user_type INT
+- user_status INT
+- created_at TIMESTAMP
+
+Description:
+Stores all user information including role and status.
+
+
+TABLE: projects
+--------------------------------------------------
+Columns:
+- id INT PRIMARY KEY
+- company_id INT
+- user_id INT
+- title TEXT
+- description TEXT
+- status TEXT
+- priority TEXT
+- due_date TEXT
+- total_task INT
+- completed_task INT
+
+Description:
+Contains project-level information and progress.
+
+
+TABLE: lists
+--------------------------------------------------
+Columns:
+- id INT PRIMARY KEY
+- company_id INT
+- user_id INT
+- title TEXT
+- total_task_count INT
+- total_member INT
+- created_at TEXT
+- updated_at TEXT
+
+Description:
+Represents task groupings or boards inside projects.
+
+
+TABLE: tasks
+--------------------------------------------------
+Columns:
+- id INT PRIMARY KEY
+- company_id INT
+- user_id INT
+- list_id INT
+- project_id INT
+- parent_id INT
+- title TEXT
+- description TEXT
+- priority TEXT
+- stage TEXT
+- status TEXT
+- due_date DATETIME
+- started_at DATETIME
+- completed_at DATETIME
+- sub_task_count INT
+- created_at DATETIME
+- updated_at DATETIME
+
+Description:
+Stores all tasks and subtasks. Parent-child hierarchy maintained using parent_id.
+
+
+TABLE: user_task   (REPORTING / FLATTENED TABLE)
+--------------------------------------------------
+Columns:
+- id INT PRIMARY KEY
+- user_id INT
+- user_name VARCHAR
+- project_id INT
+- project_name VARCHAR
+- list_id INT
+- list_name VARCHAR
+- title TEXT
+- description TEXT
+- priority TEXT
+- status TEXT
+- due_date DATETIME
+- assigned_by VARCHAR
+- assigned_to VARCHAR
+- completed_at DATETIME
+
+Description:
+Flattened task view optimized for fast reporting and natural language queries.
+
+
+==================================================
+FOREIGN KEY RELATIONSHIPS
+==================================================
+
+tasks.user_id     → users.id
+tasks.project_id  → projects.id
+tasks.list_id     → lists.id
+tasks.parent_id   → tasks.id
+
+user_task.user_id    → users.id
+user_task.project_id → projects.id
+
+
+==================================================
+QUERY STRATEGY RULES (IMPORTANT)
+==================================================
+
+1. For reporting-style questions such as:
+   - task status
+   - assigned to / assigned by
+   - due dates
+   - priority
+   - completed tasks
+
+   ALWAYS prefer using the user_task table directly.
+
+2. Use JOINs only when necessary and only with defined foreign keys above.
+
+3. Never assume columns or relationships not listed here.
+
+
+==================================================
+EXAMPLE QUERIES
+==================================================
+
+1. Status of a task assigned to a user:
+
+SELECT status
+FROM user_task
+WHERE title = 'Website Redesign'
+AND assigned_to = 'Alice';
+
+
+2. High priority tasks still in progress:
+
+SELECT *
+FROM tasks
+WHERE priority = 'High'
+AND completed_at IS NULL;
+
+
+3. Tasks belonging to a specific project:
+
+SELECT *
+FROM tasks
+JOIN projects ON tasks.project_id = projects.id
+WHERE projects.title = 'Website Redesign';
+
+
+4. Overdue tasks:
+
+SELECT *
+FROM tasks
+WHERE due_date < NOW()
+AND completed_at IS NULL;
+
+
+5. Completed main tasks (no subtasks pending):
+
+SELECT *
+FROM tasks
+WHERE completed_at IS NOT NULL
+AND parent_id = 0;
+
+
+==================================================
+END OF SCHEMA DOCUMENT
+==================================================
