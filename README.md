@@ -1,4 +1,4 @@
-# Task Report Agent
+# NL to SQL System
 
 A natural language to SQL query agent that converts plain English questions into MySQL queries against the `user_task` table and returns summarized results with optional charts.
 
