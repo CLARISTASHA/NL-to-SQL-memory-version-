@@ -2,6 +2,7 @@ import logging
 import os
 import time
 import uuid
+import json
 from datetime import datetime
 from typing import Optional
 
@@ -26,7 +27,6 @@ from task_report_agent import (
 API_KEY = os.getenv("API_KEY", "my-secret-key")
 
 # ── Logging setup ──────────────────────────────────────────────────────────────
-# FIX: Use os.makedirs with exist_ok so it never crashes if dir already exists
 log_dir = "/var/log/task_report_agent"
 os.makedirs(log_dir, exist_ok=True)
 
@@ -40,6 +40,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# ── Create response log directory ──────────────────────────────────────────────
+response_log_dir = "response_logs"
+os.makedirs(response_log_dir, exist_ok=True)
+
 # ── FastAPI app ────────────────────────────────────────────────────────────────
 app = FastAPI(
     title="Task Report Agent",
@@ -48,10 +52,9 @@ app = FastAPI(
 )
 
 # ── CORS middleware ────────────────────────────────────────────────────────────
-# FIX: CORS must be added BEFORE any routes are defined
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # Restrict to specific domains in production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -94,13 +97,6 @@ async def log_requests(request: Request, call_next):
 @app.get("/")
 @app.get("/health")
 def health_check():
-    """
-    Health check endpoint.
-    GET /        → used by Docker HEALTHCHECK
-    GET /health  → used by monitoring tools
-    FIX: Does NOT call llm.invoke() — that was too slow (~2s) for a health check
-         and would cause Docker to mark container as unhealthy during normal use.
-    """
     return {
         "status": "API is running",
         "timestamp": datetime.utcnow().isoformat(),
@@ -111,11 +107,7 @@ def health_check():
 # ── Main query endpoint ────────────────────────────────────────────────────────
 @app.post("/ask", response_model=QueryResponse)
 async def ask_query(request: QueryRequest):
-    """
-    Accepts a natural language question and returns SQL, summary, chart, report.
-    Requires api_key in request body.
-    """
-    # API key check
+
     if request.api_key != API_KEY:
         raise HTTPException(status_code=401, detail="Invalid API Key")
 
@@ -164,10 +156,9 @@ async def ask_query(request: QueryRequest):
             f"[{session_id}] SQL: {sql} | rows={row_count} | time={execution_time}s"
         )
 
-        # Store short summary in conversation history
         add_to_history(request.question, summary if summary else "No result")
 
-        return QueryResponse(
+        response_data = QueryResponse(
             session_id=session_id,
             question=request.question,
             resolved_question=resolved,
@@ -180,8 +171,19 @@ async def ask_query(request: QueryRequest):
             report=final_report,
         )
 
+        # ── NEW: Save response JSON log automatically ───────────────────────────
+        log_data = response_data.dict()
+        log_data["timestamp"] = datetime.utcnow().isoformat()
+
+        log_file = os.path.join(response_log_dir, f"{session_id}.json")
+        with open(log_file, "w") as f:
+            json.dump(log_data, f, indent=4)
+
+        logger.info(f"[{session_id}] Response saved to {log_file}")
+
+        return response_data
+
     except HTTPException:
-        # Re-raise HTTP exceptions as-is (don't wrap in 500)
         raise
     except Exception as e:
         logger.error(f"[{session_id}] Unexpected error: {str(e)}")
@@ -191,7 +193,6 @@ async def ask_query(request: QueryRequest):
 # ── Reset conversation history ─────────────────────────────────────────────────
 @app.post("/reset")
 def reset_history():
-    """Clears conversation history."""
     from task_report_agent import conversation_history
     conversation_history.clear()
     logger.info("Conversation history cleared")
