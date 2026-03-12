@@ -6,9 +6,20 @@ import matplotlib.pyplot as plt
 from io import BytesIO
 import base64
 
+from dotenv import load_dotenv
+load_dotenv()
+
 from langchain_ollama import ChatOllama, OllamaEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_core.prompts import PromptTemplate
+
+from langchain_community.vectorstores import SupabaseVectorStore
+from supabase import create_client
+
+from langchain_community.chat_message_histories import RedisChatMessageHistory
+from langchain_core.runnables.history import RunnableWithMessageHistory
+
+import redis
 
 
 # ───────────────── DATABASE ─────────────────
@@ -21,21 +32,56 @@ def get_db_connection():
     )
 
 
+# ───────────────── REDIS CACHE ─────────────────
+redis_client = redis.Redis(host="localhost", port=6379, decode_responses=True)
+
+
+def get_cache(query):
+    return redis_client.get(query)
+
+
+def set_cache(query, result):
+    redis_client.set(query, result)
+
+
 # ───────────────── VECTOR STORE ─────────────────
 embeddings = OllamaEmbeddings(model="phi3:mini")
 
 vectorstore = FAISS.load_local(
-    "schema_index",
+    "../schema_index",
     embeddings,
     allow_dangerous_deserialization=True
 )
 
-retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
+retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
 
 llm = ChatOllama(model="phi3:mini", temperature=0)
 
 
-# ───────────────── SQL PROMPT (STRICT VERSION) ─────────────────
+# ───────────────── SUPABASE VECTOR MEMORY ─────────────────
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+vector_memory = SupabaseVectorStore(
+    client=supabase,
+    embedding=embeddings,
+    table_name="query_memory"
+)
+
+supabase_retriever = vector_memory.as_retriever(search_kwargs={"k": 2})
+
+
+# ───────────────── REDIS CHAT MEMORY ─────────────────
+def get_redis_history(session_id):
+    return RedisChatMessageHistory(
+        session_id=session_id,
+        url="redis://localhost:6379"
+    )
+
+
+# ───────────────── SQL PROMPT ─────────────────
 sql_prompt = PromptTemplate(
     input_variables=["schema_context", "question"],
     template="""
@@ -89,17 +135,18 @@ def add_to_history(question, answer):
 
 
 def resolve_question_with_history(current_question):
+
     if not conversation_history:
         return current_question
 
     reference_triggers = [
-    "only", "those", "that person",
-    "same person", "for him",
-    "for her", "their tasks",
-    "filter by",
-    "status",
-    "priority"
-   ]
+        "only", "those", "that person",
+        "same person", "for him",
+        "for her", "their tasks",
+        "filter by",
+        "status",
+        "priority"
+    ]
 
     if not any(t in current_question.lower() for t in reference_triggers):
         return current_question
@@ -131,28 +178,36 @@ Rewritten Question:
 
 # ───────────────── SQL GENERATION ─────────────────
 def generate_sql(question):
-    docs = retriever.invoke(question)
-    schema_context = "\n".join(d.page_content for d in docs)
-    prompt = sql_prompt.format(schema_context=schema_context, question=question)
-    return llm.invoke(prompt).content.strip()
+
+    schema_docs = retriever.invoke(question)
+    memory_docs = supabase_retriever.invoke(question)
+
+    all_docs = schema_docs + memory_docs
+
+    schema_context = "\n".join(
+        d.page_content if hasattr(d, "page_content") else str(d)
+        for d in all_docs
+    )
+
+    prompt = sql_prompt.format(
+        schema_context=schema_context,
+        question=question
+    )
+
+    response = llm.invoke(prompt)
+
+    return response.content.strip()
 
 
 def extract_sql_and_explanation(text):
+
     cleaned = re.sub(r"```sql|```", "", text).strip()
 
-    sql_match = re.search(r"SQL:\s*(.*?)(Explanation:|$)", cleaned, re.S | re.I)
-    exp_match = re.search(r"Explanation:\s*(.*)", cleaned, re.S | re.I)
-
+    sql_match = re.search(r"(SELECT\b.+?;)", cleaned, re.S | re.I)
     sql = sql_match.group(1).strip() if sql_match else ""
-    explanation = exp_match.group(1).strip() if exp_match else ""
 
-    if not sql:
-        fallback = re.search(r"(SELECT\b.+?;)", cleaned, re.S | re.I)
-        if fallback:
-            sql = fallback.group(1).strip()
-
-    if sql and not sql.endswith(";"):
-        sql += ";"
+    exp_match = re.search(r"Explanation:\s*(.*)", cleaned, re.I)
+    explanation = exp_match.group(1).split("\n")[0].strip() if exp_match else ""
 
     return sql, explanation
 
@@ -164,30 +219,38 @@ def force_reporting_table(sql, question):
 
 
 def sanitize_sql(sql):
+
     if not sql:
         return ""
+
     if re.search(r"\b(DROP|DELETE|UPDATE|INSERT|ALTER|TRUNCATE)\b", sql, re.I):
         return ""
+
     if re.search(r"\bFROM\s+(?!user_task)\w+", sql, re.I):
         return ""
+
     return sql
 
 
 # ───────────────── EXECUTE SQL ─────────────────
 def execute_sql(sql_query):
+
     if not sql_query:
         return None, "Empty SQL query"
 
     sql_query = sanitize_sql(sql_query)
+
     if not sql_query:
         return None, "Unsafe SQL blocked"
 
     try:
+
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(sql_query)
 
         if cursor.description:
+
             columns = [c[0] for c in cursor.description]
             rows = cursor.fetchall()
 
@@ -209,44 +272,52 @@ def execute_sql(sql_query):
             pass
 
 
-# ───────────────── ANALYSIS ─────────────────
+# ───────────────── RESTORED FUNCTIONS ─────────────────
 def analyze_and_summarize(df, user_query, llm, status_flag):
 
-    if status_flag == "NO_MATCH" or df is None or (isinstance(df, pd.DataFrame) and df.empty):
-        name = re.search(r"assigned(?:\s+to)?\s+(\w+)", user_query.lower())
+    if status_flag == "NO_MATCH" or df is None:
+        name = re.search(r"assigned to (\w+)", user_query.lower())
         if name:
-            return None, f"No tasks found for '{name.group(1)}'."
-        return None, "No matching records found."
+            return None, f"{name.group(1)} is not found in the database."
+        return None, "No records exist for this query."
 
-    if status_flag and status_flag != "NO_MATCH":
-        return None, f"Query failed: {status_flag}"
+    prompt = f"""
+Summarize this data in concise business language.
+Highlight key numbers clearly.
+Keep it 2–4 sentences.
 
-    if len(df) == 1 and len(df.columns) == 1:
-        count = df.iloc[0, 0]
-        return df, f"Total count: {count}."
+User question:
+{user_query}
 
-    row_count = len(df)
-    return df, f"{row_count} records found."
+Result:
+{df.to_string(index=False)}
+"""
+
+    response = llm.invoke(prompt)
+    return df, response.content.strip()
 
 
-# ───────────────── CHART ─────────────────
 def generate_chart(df):
+
     if df is None or df.empty:
         return None
 
+    # Do NOT create chart for single value results
+    if df.shape[0] == 1 and df.shape[1] == 1:
+        return None
+
     try:
-        cols_lower = [c.lower() for c in df.columns]
 
-        if "priority" in cols_lower:
-            col = df.columns[cols_lower.index("priority")]
-            df[col].value_counts().plot(kind="pie", autopct="%1.1f%%")
+        cols = [c.lower() for c in df.columns]
 
-        elif "status" in cols_lower:
-            col = df.columns[cols_lower.index("status")]
-            df[col].value_counts().plot(kind="bar")
+        if "priority" in cols:
+            df["priority"].value_counts().plot(kind="pie", autopct="%1.1f%%")
+
+        elif "status" in cols:
+            df["status"].value_counts().plot(kind="bar")
 
         elif df.shape[1] == 2:
-            df.plot(kind="bar", x=df.columns[0], y=df.columns[1], legend=False)
+            df.plot(kind="bar", x=df.columns[0], y=df.columns[1])
 
         else:
             return None
@@ -256,66 +327,102 @@ def generate_chart(df):
         plt.savefig(buf, format="png")
         plt.close()
 
-        return f"data:image/png;base64,{base64.b64encode(buf.getvalue()).decode()}"
+        encoded = base64.b64encode(buf.getvalue()).decode()
+
+        return f"data:image/png;base64,{encoded}"
 
     except Exception:
-        plt.close()
         return None
 
 
-# ───────────────── REPORT ─────────────────
 def build_report(df, summary, chart_uri):
+
     table_text = df.to_string(index=False) if df is not None and not df.empty else "No data"
-    report = f"SUMMARY:\n{summary}\n\nDATA:\n{table_text}"
+
+    report = f"""
+SUMMARY:
+{summary}
+
+DATA:
+{table_text}
+"""
+
     if chart_uri:
-        report += f"\n\nCHART URI:\n{chart_uri}"
+        report += f"\nCHART URI:\n{chart_uri}\n"
+
     return report.strip()
 
 
 # ───────────────── MAIN LOOP ─────────────────
 if __name__ == "__main__":
+
     print("System Ready")
 
+    user_id = input("Enter user id: ")
+    session_id = input("Enter session id: ")
+
     while True:
+
         question = input("\nAsk (type exit to quit): ")
+
         if question.lower() == "exit":
             break
 
+        cached = get_cache(question)
+
+        if cached:
+            print("\n[CACHE HIT]")
+            print(cached)
+            continue
+
         resolved_question = resolve_question_with_history(question)
+
         if resolved_question != question:
             print(f"\n[Resolved Question]: {resolved_question}")
 
         llm_output = generate_sql(resolved_question)
+
         sql, explanation = extract_sql_and_explanation(llm_output)
+
         sql = force_reporting_table(sql, resolved_question)
 
         print("\nGenerated SQL:")
         print(sql if sql else "(no SQL generated)")
+
         print("\nExplanation:", explanation)
 
         if not sql.strip():
+
             print("\n[WARNING] No SQL generated.")
+
             add_to_history(question, "No SQL generated")
+
             continue
 
         print("\nExecuting SQL...\n")
 
         df, status_flag = execute_sql(sql)
-        result, summary = analyze_and_summarize(df, resolved_question, llm, status_flag)
+
+        try:
+            if sql:
+                vector_memory.add_texts(
+                    texts=[resolved_question],
+                    metadatas=[{"sql": sql}]
+                )
+        except Exception as e:
+            print("Vector memory save failed:", e)
 
         print("Result:")
+
         if df is not None and not df.empty:
-            print(df.to_string(index=False))
+            result_text = df.to_string(index=False)
+            print(result_text)
         else:
+            result_text = "No data"
             print("No data")
 
-        print("\nResult Summary:")
-        print(summary)
+        set_cache(question, result_text)
 
-        chart_uri = generate_chart(df)
+        add_to_history(question, result_text)
 
-        print("\nFinal Report:")
-        print(build_report(df, summary, chart_uri))
-
-        add_to_history(question, summary if summary else "No result")
         print("\n-------------------------")

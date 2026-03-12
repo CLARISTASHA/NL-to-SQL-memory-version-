@@ -7,7 +7,7 @@ import re
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from test_questions import TEST_QUESTIONS
-from task_report_agent import (
+from backend.task_report_agent import (
     generate_sql,
     extract_sql_and_explanation,
     execute_sql,

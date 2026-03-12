@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+
+<html>
+
+<head>
+<title>AI SQL Assistant</title>
+
+<style>
+
+body{
+font-family: Arial;
+background:#0f172a;
+color:white;
+padding:40px;
+}
+
+.container{
+width:900px;
+margin:auto;
+}
+
+input{
+width:70%;
+padding:12px;
+border-radius:8px;
+border:none;
+}
+
+button{
+padding:12px 20px;
+background:#22c55e;
+border:none;
+border-radius:8px;
+cursor:pointer;
+}
+
+table{
+margin-top:20px;
+width:100%;
+border-collapse:collapse;
+}
+
+th,td{
+border:1px solid #444;
+padding:10px;
+text-align:left;
+}
+
+.sql{
+background:#1e293b;
+padding:10px;
+margin-top:15px;
+}
+
+.summary{
+background:#1e293b;
+padding:10px;
+margin-top:15px;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div class="container">
+
+<h1>AI SQL Assistant</h1>
+
+<input id="question" placeholder="Ask a database question...">
+
+<button onclick="ask()">Ask</button>
+
+<div id="sqlBox"></div>
+
+<div id="summaryBox"></div>
+
+<table id="result"></table>
+
+<img id="chart" style="margin-top:20px;max-width:100%">
+
+</div>
+
+<script>
+
+async function ask(){
+
+let q=document.getElementById("question").value
+
+let res=await fetch("http://localhost:8000/ask",{
+method:"POST",
+headers:{"Content-Type":"application/json"},
+body:JSON.stringify({
+question:q,
+api_key:"my-secret-key"
+})
+})
+
+let data=await res.json()
+
+/* SQL */
+
+document.getElementById("sqlBox").innerHTML=
+"<div class='sql'><b>Generated SQL:</b><br>"+data.generated_sql+"</div>"
+
+
+/* Summary */
+
+document.getElementById("summaryBox").innerHTML=
+"<div class='summary'><b>Summary:</b><br>"+data.summary+"</div>"
+
+
+/* TABLE */
+
+let table=document.getElementById("result")
+table.innerHTML=""
+
+if(!data.report || data.report.includes("No data")){
+table.innerHTML="<tr><td>No results</td></tr>"
+return
+}
+
+/* Extract DATA section */
+
+let lines=data.report.split("\n")
+
+let dataIndex=lines.findIndex(line=>line.trim()==="DATA:")
+
+if(dataIndex===-1){
+table.innerHTML="<tr><td>No results</td></tr>"
+return
+}
+
+let rows=lines.slice(dataIndex+1).filter(line=>line.trim()!=="")
+
+if(rows.length===0){
+table.innerHTML="<tr><td>No results</td></tr>"
+return
+}
+
+/* Header */
+
+let headers=rows[0].trim().split(/\s+/)
+
+let headerRow="<tr>"
+headers.forEach(h=>headerRow+="<th>"+h+"</th>")
+headerRow+="</tr>"
+
+table.innerHTML+=headerRow
+
+/* Rows */
+
+rows.slice(1).forEach(row=>{
+let cells=row.trim().split(/\s+/)
+
+let r="<tr>"
+cells.forEach(c=>r+="<td>"+c+"</td>")
+r+="</tr>"
+
+table.innerHTML+=r
+})
+
+
+/* CHART */
+
+if(data.chart_uri){
+document.getElementById("chart").src=data.chart_uri
+}else{
+document.getElementById("chart").src=""
+}
+
+}
+
+</script>
+
+</body>
+</html>

@@ -108,7 +108,7 @@ def health_check():
 @app.post("/ask", response_model=QueryResponse)
 async def ask_query(request: QueryRequest):
 
-    if request.api_key != API_KEY:
+    if API_KEY and request.api_key != API_KEY:
         raise HTTPException(status_code=401, detail="Invalid API Key")
 
     session_id = request.session_id or str(uuid.uuid4())
@@ -193,7 +193,7 @@ async def ask_query(request: QueryRequest):
 # ── Reset conversation history ─────────────────────────────────────────────────
 @app.post("/reset")
 def reset_history():
-    from task_report_agent import conversation_history
+    from backend.task_report_agent import conversation_history
     conversation_history.clear()
     logger.info("Conversation history cleared")
     return {"status": "ok", "message": "Conversation history cleared."}

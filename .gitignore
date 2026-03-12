@@ -1,21 +1,19 @@
 # Python cache
 __pycache__/
 *.pyc
-
 # Environment
 .env
-
 # Logs
 *.log
 api_logs.log
-
 # Local vector index (generated)
 schema_index/
-
 # System files
 .DS_Store
 Thumbs.db
-
 # Virtual environment
 venv/
 .env/
+#response json
+response_logs/
+values.txt
