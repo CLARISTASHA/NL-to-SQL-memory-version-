@@ -45,7 +45,7 @@ def set_cache(query, result):
 
 
 # ───────────────── VECTOR STORE ─────────────────
-embeddings = OllamaEmbeddings(model="phi3:mini")
+embeddings = OllamaEmbeddings(model="nomic-embed-text")
 
 vectorstore = FAISS.load_local(
     "../schema_index",
@@ -67,7 +67,8 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 vector_memory = SupabaseVectorStore(
     client=supabase,
     embedding=embeddings,
-    table_name="query_memory"
+    table_name="query_memory",
+    query_name="match_query_memory"
 )
 
 supabase_retriever = vector_memory.as_retriever(search_kwargs={"k": 2})
@@ -354,6 +355,9 @@ DATA:
 
 
 # ───────────────── MAIN LOOP ─────────────────
+import traceback  # ✅ ADD THIS AT TOP OF FILE
+
+# ───────────────── MAIN LOOP ─────────────────
 if __name__ == "__main__":
 
     print("System Ready")
@@ -392,17 +396,15 @@ if __name__ == "__main__":
         print("\nExplanation:", explanation)
 
         if not sql.strip():
-
             print("\n[WARNING] No SQL generated.")
-
             add_to_history(question, "No SQL generated")
-
             continue
 
         print("\nExecuting SQL...\n")
 
         df, status_flag = execute_sql(sql)
 
+        # ✅ FIXED TRY-EXCEPT BLOCK
         try:
             if sql:
                 vector_memory.add_texts(
@@ -410,7 +412,8 @@ if __name__ == "__main__":
                     metadatas=[{"sql": sql}]
                 )
         except Exception as e:
-            print("Vector memory save failed:", e)
+            print("FULL ERROR:", str(e))
+            traceback.print_exc()
 
         print("Result:")
 
@@ -422,7 +425,6 @@ if __name__ == "__main__":
             print("No data")
 
         set_cache(question, result_text)
-
         add_to_history(question, result_text)
 
         print("\n-------------------------")

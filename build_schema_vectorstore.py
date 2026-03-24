@@ -19,7 +19,7 @@ docs = text_splitter.split_documents(documents)
 
 print(f"Total chunks created: {len(docs)}")
 
-embeddings = OllamaEmbeddings(model="phi3:mini")
+embeddings = OllamaEmbeddings(model="nomic-embed-text")
 
 vectorstore = FAISS.from_documents(docs, embeddings)
 
